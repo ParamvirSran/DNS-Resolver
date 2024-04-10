@@ -12,7 +12,7 @@ from dnsParser import (
     parse_header,
     parse_question,
 )
-from dnsQuery import encode_dns_name, header_to_bytes, question_to_bytes, build_query
+from dnsQuery import encode_dns_name, header_to_bytes, question_to_bytes
 
 TYPE_TXT = 16
 TYPE_A = 1
@@ -26,21 +26,20 @@ nameserver = "198.41.0.4"
 from dnsParser import decode_name, parse_header, parse_question
 
 
-# Duplicate function           
-# # build a dns query from a domain name and record type
-# def build_query(domain_name, record_type):
-    # name = encode_dns_name(domain_name)
-    # id = random.randint(0, 65535)
-    # header = DNSHeader(
-        # id=id,
-        # flags=0,
-        # num_questions=1,
-        # num_answers=0,
-        # num_authorities=0,
-        # num_additionals=0,
-    # )
-    # question = DNSQuestion(name, record_type, CLASS_IN)
-    # return header_to_bytes(header) + question_to_bytes(question)
+# build a dns query from a domain name and record type
+def build_query(domain_name, record_type):
+    name = encode_dns_name(domain_name)
+    id = random.randint(0, 65535)
+    header = DNSHeader(
+        id=id,
+        flags=0,
+        num_questions=1,
+        num_answers=0,
+        num_authorities=0,
+        num_additionals=0,
+    )
+    question = DNSQuestion(name, record_type, CLASS_IN)
+    return header_to_bytes(header) + question_to_bytes(question)
 
 
 # send a dns query to a nameserver and return the response
@@ -52,29 +51,27 @@ def send_query(ip_address, domain_name, record_type):
         return parse_dns_packet(response)
 
 
-# Duplicate
-# # parse a dns record from raw bytes (used for parsing answers, authorities, and additionals)
-# def parse_record(reader):
-    # name = decode_name(reader)
-    # data = reader.read(10)
-    # type_, class_, ttl, data_len = struct.unpack("!HHIH", data)
-    # if type_ == TYPE_A:
-        # data = reader.read(data_len)
-    # else:
-        # data = reader.read(data_len)
-    # return DNSRecord(name, type_, class_, ttl, data)
+# parse a dns record from raw bytes (used for parsing answers, authorities, and additionals)
+def parse_record(reader):
+    name = decode_name(reader)
+    data = reader.read(10)
+    type_, class_, ttl, data_len = struct.unpack("!HHIH", data)
+    if type_ == TYPE_A:
+        data = reader.read(data_len)
+    else:
+        data = reader.read(data_len)
+    return DNSRecord(name, type_, class_, ttl, data)
 
 
-# Duplicate
-# # parse a dns packet from raw bytes
-# def parse_dns_packet(data):
-    # reader = BytesIO(data)
-    # header = parse_header(reader)
-    # questions = [parse_question(reader) for _ in range(header.num_questions)]
-    # answers = [parse_record(reader) for _ in range(header.num_answers)]
-    # authorities = [parse_record(reader) for _ in range(header.num_authorities)]
-    # additionals = [parse_record(reader) for _ in range(header.num_additionals)]
-    # return DNSPacket(header, questions, answers, authorities, additionals)
+# parse a dns packet from raw bytes
+def parse_dns_packet(data):
+    reader = BytesIO(data)
+    header = parse_header(reader)
+    questions = [parse_question(reader) for _ in range(header.num_questions)]
+    answers = [parse_record(reader) for _ in range(header.num_answers)]
+    authorities = [parse_record(reader) for _ in range(header.num_authorities)]
+    additionals = [parse_record(reader) for _ in range(header.num_additionals)]
+    return DNSPacket(header, questions, answers, authorities, additionals)
 
 
 def get_answer(packet):
