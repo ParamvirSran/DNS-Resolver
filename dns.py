@@ -205,6 +205,13 @@ def resolve(domain_name, record_type):
             raise Exception("something went wrong")
 
 
+def ip_to_bytes(ip_address):
+    try:
+        return socket.inet_aton(ip_address)
+    except socket.error as e:
+        raise ValueError(f"Invalid IP address '{ip_address}': {e}")
+
+
 # main function to start the server and listen for incoming requests to resolve domain names
 def main():
     server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -219,9 +226,11 @@ def main():
         record_type = query.type_
         print(f"Received query for {domain_name} ({record_type}) from {addr}")
         ip_address = resolve(domain_name, record_type)
-        response = build_query(domain_name, record_type)
-        server.sendto(response, addr)
-        print(f"Sent response to {addr} with IP address {ip_address}")
+        print(f"Resolved {domain_name} to {ip_address}")
+
+        ipBytes = ip_to_bytes(ip_address)
+        print(ipBytes)
+        server.sendto(ipBytes, addr)
 
 
 if __name__ == "__main__":
