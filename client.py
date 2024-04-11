@@ -1,35 +1,29 @@
 import socket
 
-# Assuming dnsQuery.py is available for building queries
-import dnsQuery
+import dns
 
-TYPE_A = 1
 server_address = "localhost"
 server_port = 6969
 domain_name = "example.com"
-record_type = TYPE_A
+TYPE_A = 1
 
 
+# main function to make a DNS query to the server and print the response
 def main():
-    # Prepare the DNS query
-    query = dnsQuery.build_query(domain_name, record_type)
+    query = dns.build_query(domain_name, TYPE_A)
 
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client_socket:
-        # Send the DNS query to the server
-        client_socket.sendto(query, (server_address, server_port))
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.sendto(query, (server_address, server_port))
+        try:
 
-        # Receive the response from the server
-        data, addr = client_socket.recvfrom(1024)
+            data, addr = sock.recvfrom(1024)
+            response = dns.parse_dns_packet(data)
+            ip_address = dns.get_answer(response)
+            print(f"Received response from {addr} with IP address {ip_address}")
 
-        # Simply print the raw response data
-        # Normally, the client should parse this data to read the response,
-        # but parsing DNS packets is non-trivial and typically handled by libraries
-        print(f"Received response from {addr}")
-        print(f"Response: {data}")
-
-        # The client generally wouldn't perform DNS resolution itself
-        # or attempt to parse the DNS response packet directly without a library.
-        # Instead, it would use higher-level libraries or system calls for such tasks.
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return
 
 
 if __name__ == "__main__":

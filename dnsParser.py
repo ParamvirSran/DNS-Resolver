@@ -1,12 +1,6 @@
-import socket
-import struct
 from dataclasses import dataclass
-from io import BytesIO
-from typing import List
 
 from dnsQuery import DNSHeader, DNSQuestion, build_query
-
-TYPE_A = 1
 
 
 @dataclass
@@ -18,23 +12,17 @@ class DNSRecord:
     data: bytes
 
 
-@dataclass
-class DNSPacket:
-    header: DNSHeader
-    questions: List[DNSQuestion]
-    answers: List[DNSRecord]
-    authorities: List[DNSRecord]
-    additionals: List[DNSRecord]
+import struct
 
 
 def parse_header(reader):
-    data = reader.read(12)
-    id_, flags, num_questions, num_answers, num_authorities, num_additionals = (
-        struct.unpack("!HHHHHH", data)
-    )
-    return DNSHeader(
-        id_, flags, num_questions, num_answers, num_authorities, num_additionals
-    )
+    header_data = reader.read(12)
+    if len(header_data) != 12:
+        raise ValueError("Incomplete DNS header")
+    return DNSHeader(*struct.unpack("!HHHHHH", header_data))
+
+
+from io import BytesIO
 
 
 def parse_question(reader):
@@ -44,38 +32,44 @@ def parse_question(reader):
     return DNSQuestion(name, type_, class_)
 
 
+from io import BytesIO
+
+
 def decode_name(reader):
-    name = []
+    name = b""
     while True:
-        length = reader.read(1)[0]
+        length = ord(reader.read(1))
         if length == 0:
             break
-        if (length & 192) == 192:
-            name.append(decode_compressed_name(length, reader))
+        if length & 0b11000000:
+            offset = ((length & 0b00111111) << 8) + ord(reader.read(1))
+            saved_position = reader.tell()
+            reader.seek(offset)
+            name += decode_name(reader)
+            reader.seek(saved_position)
             break
-        name.append(reader.read(length).decode("ascii"))
-    return ".".join(name)
-
-
-def decode_compressed_name(length, reader):
-    pointer_bytes = bytes([length & 63]) + reader.read(1)
-    pointer = struct.unpack("!H", pointer_bytes)[0]
-    current_pos = reader.tell()
-    reader.seek(pointer)
-    result = decode_name(reader)
-    reader.seek(current_pos)
-    return result
+        name += reader.read(length) + b"."
+    return name
 
 
 def parse_record(reader):
     name = decode_name(reader)
     data = reader.read(10)
     type_, class_, ttl, data_len = struct.unpack("!HHIH", data)
-    if type_ == TYPE_A:
-        data = reader.read(data_len)
-    else:
-        data = reader.read(data_len)
+    data = reader.read(data_len)
     return DNSRecord(name, type_, class_, ttl, data)
+
+
+from typing import List
+
+
+@dataclass
+class DNSPacket:
+    header: DNSHeader
+    questions: List[DNSQuestion]
+    answers: List[DNSRecord]
+    authorities: List[DNSRecord]
+    additionals: List[DNSRecord]
 
 
 def parse_dns_packet(data):
@@ -89,13 +83,18 @@ def parse_dns_packet(data):
 
 
 def ip_to_string(ip):
-    return ".".join(str(byte) for byte in ip)
+    return ".".join([str(x) for x in ip])
+
+
+import socket
+
+TYPE_A = 1
 
 
 def lookup_domain(domain_name):
     query = build_query(domain_name, TYPE_A)
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client_socket:
-        client_socket.sendto(query, ("localhost", 6969))
-        response, _ = client_socket.recvfrom(1024)
-        packet = parse_dns_packet(response)
-        return packet.answers[0].data
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.sendto(query, ("8.8.8.8", 53))
+    data, _ = sock.recvfrom(1024)
+    response = parse_dns_packet(data)
+    return ip_to_string(response.answers[0].data)

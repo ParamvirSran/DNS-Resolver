@@ -1,6 +1,3 @@
-import random
-import socket
-
 from dnsParser import (
     DNSHeader,
     DNSPacket,
@@ -12,158 +9,148 @@ from dnsParser import (
     parse_header,
     parse_question,
 )
-from dnsQuery import encode_dns_name, header_to_bytes, question_to_bytes, build_query
+from dnsQuery import encode_dns_name, header_to_bytes, question_to_bytes
+
+TYPE_A = 1
+CLASS_IN = 1
+import random
+import socket
+import struct
+from io import BytesIO
+
+from dnsParser import decode_name, parse_header, parse_question
+
+port = 6969
+host = "127.0.0.1"
+
+
+def build_query(domain_name, record_type):
+    name = encode_dns_name(domain_name)
+    id = random.randint(0, 65535)
+    header = DNSHeader(id=id, num_questions=1, flags=0)
+    question = DNSQuestion(name=name, type_=record_type, class_=CLASS_IN)
+    return header_to_bytes(header) + question_to_bytes(question)
+
+
+import socket
+
+
+def send_query(ip_address, domain_name, record_type):
+    query = build_query(domain_name, record_type)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.sendto(query, (ip_address, 53))
+    data, _ = sock.recvfrom(1024)
+    return parse_dns_packet(data)
+
 
 TYPE_TXT = 16
 TYPE_A = 1
 TYPE_NS = 2
 import struct
 
-CLASS_IN = 1
+
+def parse_record(reader):
+    name = decode_name(reader)
+    data = reader.read(10)
+    type_, class_, ttl, data_len = struct.unpack("!HHIH", data)
+    if type_ == TYPE_NS:
+        data = decode_name(reader)
+    elif type_ == TYPE_A:
+        data = ip_to_string(reader.read(data_len))
+    else:
+        data = reader.read(data_len)
+    return DNSRecord(name, type_, class_, ttl, data)
+
+
 from io import BytesIO
 
-nameserver = "198.41.0.4"
 from dnsParser import decode_name, parse_header, parse_question
 
 
-# Duplicate function           
-# # build a dns query from a domain name and record type
-# def build_query(domain_name, record_type):
-    # name = encode_dns_name(domain_name)
-    # id = random.randint(0, 65535)
-    # header = DNSHeader(
-        # id=id,
-        # flags=0,
-        # num_questions=1,
-        # num_answers=0,
-        # num_authorities=0,
-        # num_additionals=0,
-    # )
-    # question = DNSQuestion(name, record_type, CLASS_IN)
-    # return header_to_bytes(header) + question_to_bytes(question)
-
-
-# send a dns query to a nameserver and return the response
-def send_query(ip_address, domain_name, record_type):
-    query = build_query(domain_name, record_type)
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client_socket:
-        client_socket.sendto(query, (ip_address, 53))
-        response, _ = client_socket.recvfrom(1024)
-        return parse_dns_packet(response)
-
-
-# Duplicate
-# # parse a dns record from raw bytes (used for parsing answers, authorities, and additionals)
-# def parse_record(reader):
-    # name = decode_name(reader)
-    # data = reader.read(10)
-    # type_, class_, ttl, data_len = struct.unpack("!HHIH", data)
-    # if type_ == TYPE_A:
-        # data = reader.read(data_len)
-    # else:
-        # data = reader.read(data_len)
-    # return DNSRecord(name, type_, class_, ttl, data)
-
-
-# Duplicate
-# # parse a dns packet from raw bytes
-# def parse_dns_packet(data):
-    # reader = BytesIO(data)
-    # header = parse_header(reader)
-    # questions = [parse_question(reader) for _ in range(header.num_questions)]
-    # answers = [parse_record(reader) for _ in range(header.num_answers)]
-    # authorities = [parse_record(reader) for _ in range(header.num_authorities)]
-    # additionals = [parse_record(reader) for _ in range(header.num_additionals)]
-    # return DNSPacket(header, questions, answers, authorities, additionals)
+def parse_dns_packet(data):
+    reader = BytesIO(data)
+    header = parse_header(reader)
+    questions = [parse_question(reader) for _ in range(header.num_questions)]
+    answers = [parse_record(reader) for _ in range(header.num_answers)]
+    authorities = [parse_record(reader) for _ in range(header.num_authorities)]
+    additionals = [parse_record(reader) for _ in range(header.num_additionals)]
+    return DNSPacket(header, questions, answers, authorities, additionals)
 
 
 def get_answer(packet):
     for x in packet.answers:
         if x.type_ == TYPE_A:
-            return ip_to_string(x.data)
+            return x.data
 
 
 def get_nameserver_ip(packet):
-    for x in packet.authorities:
+    for x in packet.additionals:
         if x.type_ == TYPE_A:
-            return ip_to_string(x.data)
+            return x.data
 
 
 def get_nameserver(packet):
     for x in packet.authorities:
         if x.type_ == TYPE_NS:
-            return x.data
+            return x.data.decode("utf-8")
 
 
 def resolve(domain_name, record_type):
-    # Assuming 'nameserver' is initialized earlier or passed as an argument
-    # This simplified example needs to be expanded based on actual logic for iterating NS records
-    response = send_query(nameserver, domain_name, record_type)
-    if response.header.flags & 0x0F == 3:
-        # NXDOMAIN, domain does not exist
-        return None
-    elif response.answers:
-        # Found an answer, return the first A record's IP
-        for answer in response.answers:
-            if answer.type_ == TYPE_A:
-                return ip_to_string(answer.data)
-    # Additional handling for other cases
-    return None
-
-
-def serialize_dns_response(request, ip):
-    writer = BytesIO()
-    writer.write(header_to_bytes(request.header))  # Copy request header to response
-    for question in request.questions:
-        temp_question = DNSQuestion(name=question.name.encode('utf-8'), type_=question.type_, class_=question.class_)
-        writer.write(question_to_bytes(temp_question))  # Include question in response
-    if ip:
-        ip_bytes = socket.inet_aton(ip)
-        answer_section = struct.pack("!HHIH", TYPE_A, CLASS_IN, 300, 4) + ip_bytes
-        writer.write(answer_section)
-    else:
-        # Modify response header for error, e.g., NXDOMAIN (name does not exist)
-        # This example directly manipulates 'writer' which may not reflect actual header modifications
-        # Consider adjusting the header flags to indicate an error
-        pass
-    return writer.getvalue()
+    nameserver = "198.41.0.4"
+    while True:
+        print(f"Querying {nameserver} for {domain_name}")
+        response = send_query(nameserver, domain_name, record_type)
+        if ip := get_answer(response):
+            return ip
+        elif nsIP := get_nameserver_ip(response):
+            nameserver = nsIP
+        elif ns_domain := get_nameserver(response):
+            nameserver = resolve(ns_domain, TYPE_A)
+        else:
+            raise Exception("something went wrong")
 
 
 def main():
-    server_address = "localhost"
-    server_port = 6969
-
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server_socket:
-        server_socket.bind((server_address, server_port))
-        print(f"Listening on {server_address}:{server_port}")
+        server_socket.bind((host, port))
+        print(f"DNS Resolver Server listening on {host}:{port}")
 
         while True:
             data, addr = server_socket.recvfrom(1024)
+            response = parse_dns_packet(data)
             print(f"Received query from {addr}")
-            print(data)
-
-            try:
-                request = parse_dns_packet(data)
-                print(f"Parsed query: {request}")
-
-                domain_name = request.questions[0].name
-                print(f"Received query for {domain_name}")
-
-                record_type = request.questions[0].type_
-                print(f"Received query for {record_type}")
-                print("here")
-
+            print(f"Questions: {response.questions}")
+            for question in response.questions:
+                domain_name = question.name.decode("ascii")
+                record_type = question.type_
                 ip = resolve(domain_name, record_type)
-                print(f"Resolved to {ip}")
-
-                response = serialize_dns_response(request, ip)
-                server_socket.sendto(response, addr)
-                print(f"Sent response to {addr}")
-            except Exception as e:
-                print(f"Error: {e}")
-                server_socket.sendto(b"\x00", addr)
-                print(f"Sent error response to {addr}")
-                continue
+                print(f"Resolved {domain_name} to {ip}")
+                response_header = DNSHeader(
+                    id=response.header.id, flags=0x8000, num_answers=1
+                )
+                response_question = DNSQuestion(
+                    name=question.name, type_=question.type_, class_=question.class_
+                )
+                response_record = DNSRecord(
+                    name=question.name,
+                    type_=record_type,
+                    class_=CLASS_IN,
+                    ttl=60,
+                    data=ip,
+                )
+                response_packet = DNSPacket(
+                    header=response_header,
+                    questions=[response_question],
+                    answers=[response_record],
+                    authorities=[],
+                    additionals=[],
+                )
+                response_data = (
+                    header_to_bytes(response_header)
+                    + question_to_bytes(response_question)
+                    + response_record.to_bytes()
+                )
+                server_socket.sendto(response_data, addr)
 
 
 if __name__ == "__main__":
