@@ -192,7 +192,9 @@ def get_nameserver(packet):
 # resolve a domain name and record type and return the ip address or nameserver ip
 def resolve(domain_name, record_type):
     nameserver = "198.41.0.4"
+    timeout = 0;
     while True:
+        timeout+=1
         print(f"Querying {nameserver} for {domain_name}")
         response = send_query(nameserver, domain_name, record_type)
         if ip := get_answer(response):
@@ -202,7 +204,9 @@ def resolve(domain_name, record_type):
         elif ns_domain := get_nameserver(response):
             nameserver = resolve(ns_domain, TYPE_A)
         else:
-            raise Exception("something went wrong")
+            raise Exception("Problem Resolving Domain")          
+        if(timeout>10):
+            raise Exception("Problem Resolving Domain")
 
 
 # convert an ip address to bytes to send over the network
@@ -220,16 +224,21 @@ def main():
     print(f"DNS server listening on {address}:{port}")
 
     while True:
-        data, addr = server.recvfrom(1024)
-        request = parse_dns_packet(data)
-        query = request.questions[0]
-        domain_name = query.name.decode("ascii")
-        record_type = query.type_
-        print(f"Received query for {domain_name} ({record_type}) from {addr}")
-        ip_address = resolve(domain_name, record_type)
-        print(f"Resolved {domain_name} to {ip_address}")
-        ipBytes = ip_to_bytes(ip_address)
-        server.sendto(ipBytes, addr)
+        try:
+            data, addr = server.recvfrom(1024)
+            request = parse_dns_packet(data)
+            query = request.questions[0]
+            domain_name = query.name.decode("ascii")
+            record_type = query.type_
+            print(f"Received query for {domain_name} ({record_type}) from {addr}")
+            ip_address = resolve(domain_name, record_type)
+            print(f"Resolved {domain_name} to {ip_address}")
+            ipBytes = ip_to_bytes(ip_address)
+            server.sendto(ipBytes, addr)
+        except Exception as e:
+            print("Error Occured: "+str(e))
+            ipBytes = ip_to_bytes('0.0.0.0')
+            server.sendto(ipBytes, addr)
 
 
 if __name__ == "__main__":
