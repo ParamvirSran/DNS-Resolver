@@ -2,10 +2,9 @@ import socket
 
 import dns
 
-# Server address and port
 server_address = "localhost"
 server_port = 6969
-domain_name = "example.com"
+domain_name = "google.com"
 TYPE_A = 1
 
 

@@ -205,6 +205,7 @@ def resolve(domain_name, record_type):
             raise Exception("something went wrong")
 
 
+# convert an ip address to bytes to send over the network
 def ip_to_bytes(ip_address):
     try:
         return socket.inet_aton(ip_address)
@@ -227,9 +228,7 @@ def main():
         print(f"Received query for {domain_name} ({record_type}) from {addr}")
         ip_address = resolve(domain_name, record_type)
         print(f"Resolved {domain_name} to {ip_address}")
-
         ipBytes = ip_to_bytes(ip_address)
-        print(ipBytes)
         server.sendto(ipBytes, addr)
 
 
