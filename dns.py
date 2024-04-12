@@ -1,3 +1,6 @@
+# 4459 Group Project - DNS Resolver
+# Server script that listens for incoming requests to resolve domain names
+
 import dataclasses
 import random
 import socket
@@ -6,12 +9,14 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import List
 
-TYPE_A = 1
-CLASS_IN = 1
-TYPE_NS = 2
-TYPE_TXT = 16
+# record types
+TYPE_A = 1  # Address record type (IPv4 address)
+TYPE_NS = 2  # Name server record type (domain name)
+CLASS_IN = 1  # Internet class of addresses
+TYPE_TXT = 16  # Text strings
 
-port = 6969
+# server address and port
+port = 3599
 address = "localhost"
 
 
@@ -54,7 +59,7 @@ class DNSPacket:
     additionals: List[DNSRecord]
 
 
-# convert bytes to header
+# convert header to bytes
 def header_to_bytes(header):
     fields = dataclasses.astuple(header)
     return struct.pack("!HHHHHH", *fields)
@@ -65,7 +70,7 @@ def question_to_bytes(question):
     return question.name + struct.pack("!HH", question.type_, question.class_)
 
 
-# encode a domain name as a sequence of labels prefixed by their length
+# encode a domain name to bytes to send over the network
 def encode_dns_name(domain_name):
     encoded = b""
     for part in domain_name.encode("ascii").split(b"."):
@@ -73,7 +78,7 @@ def encode_dns_name(domain_name):
     return encoded + b"\x00"
 
 
-# parse header from the reader and return a DNSHeader object
+# parse a header from the reader and return a DNSHeader object
 def parse_header(reader):
     items = struct.unpack("!HHHHHH", reader.read(12))
     return DNSHeader(*items)
@@ -87,19 +92,21 @@ def parse_question(reader):
     return DNSQuestion(name, type_, class_)
 
 
-# decode the name from the reader
+# decode the domain name from the reader and return the domain name
 def decode_name(reader):
     parts = []
     while (length := reader.read(1)[0]) != 0:
         if length & 192:
-            parts.append(decode_compressed_name(length, reader))
+            parts.append(
+                decode_compressed_name(length, reader)
+            )  # compressed name if length is 192
             break
         else:
             parts.append(reader.read(length))
     return b".".join(parts)
 
 
-# decode the compressed name from the reader if the length is 192
+# decode a compressed name from the reader and return the domain name
 def decode_compressed_name(length, reader):
     pointer_bytes = bytes([length & 63]) + reader.read(1)
     pointer = struct.unpack("!H", pointer_bytes)[0]
@@ -110,12 +117,12 @@ def decode_compressed_name(length, reader):
     return result
 
 
-# convert an ip address to a string in dotted decimal format
+# convert an ip address to a string
 def ip_to_string(ip):
     return ".".join([str(x) for x in ip])
 
 
-# lookup the ip address for the given domain name
+# lookup the domain name using the Google DNS server and return the ip address
 def lookup_domain(domain_name):
     query = build_query(domain_name, TYPE_A)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -134,7 +141,7 @@ def build_query(domain_name, record_type):
     return header_to_bytes(header) + question_to_bytes(question)
 
 
-# send a DNS query to the given ip address for the given domain name and record type
+# send a query to the given ip address for the domain name and record type
 def send_query(ip_address, domain_name, record_type):
     query = build_query(domain_name, record_type)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -143,7 +150,7 @@ def send_query(ip_address, domain_name, record_type):
     return parse_dns_packet(data)
 
 
-# get a dns record from the reader and return a DNSRecord object
+# parse a record from the reader and return a DNSRecord object
 def parse_record(reader):
     name = decode_name(reader)
     data = reader.read(10)
@@ -157,7 +164,7 @@ def parse_record(reader):
     return DNSRecord(name, type_, class_, ttl, data)
 
 
-# parse a dns packet from the given data and return a DNSPacket object
+# parse a DNS packet from the data and return a DNSPacket object
 def parse_dns_packet(data):
     reader = BytesIO(data)
     header = parse_header(reader)
@@ -168,44 +175,53 @@ def parse_dns_packet(data):
     return DNSPacket(header, questions, answers, authorities, additionals)
 
 
-# get the answer from the packet if it exists
+# get the answer from the packet if it exists and return the ip address
 def get_answer(packet):
     for x in packet.answers:
         if x.type_ == TYPE_A:
             return x.data
 
 
-# get the nameserver ip from the packet if it exists
+# get the nameserver ip from the packet if it exists and return the ip address
 def get_nameserver_ip(packet):
     for x in packet.additionals:
         if x.type_ == TYPE_A:
             return x.data
 
 
-# get the nameserver from the packet if it exists
+# get the nameserver from the packet if it exists and return the domain name
 def get_nameserver(packet):
     for x in packet.authorities:
         if x.type_ == TYPE_NS:
             return x.data.decode("utf-8")
 
 
-# resolve a domain name and record type and return the ip address or nameserver ip
+# resolve the domain name by querying the root nameserver and return the ip address
 def resolve(domain_name, record_type):
-    nameserver = "198.41.0.4"
-    timeout = 0;
+    nameserver = "198.41.0.4"  # root nameserver ip address (a.root-servers.net)
+    timeout = 0  # timeout counter to prevent infinite loop if the domain is not found
+
+    # while the ip address is not found keep recursively querying the nameservers
     while True:
-        timeout+=1
-        print(f"Querying {nameserver} for {domain_name}")
+        timeout += 1
+        print(f"Querying {nameserver} for {domain_name} ({record_type})")
         response = send_query(nameserver, domain_name, record_type)
-        if ip := get_answer(response):
+
+        # conditions to check if the answer, nameserver ip or nameserver is found
+        if ip := get_answer(response):  # if the answer is found return the ip
             return ip
-        elif nsIP := get_nameserver_ip(response):
+        elif nsIP := get_nameserver_ip(
+            response
+        ):  # if the nameserver ip is found query the nameserver
             nameserver = nsIP
-        elif ns_domain := get_nameserver(response):
+        elif ns_domain := get_nameserver(
+            response
+        ):  # if the nameserver is found query the nameserver
             nameserver = resolve(ns_domain, TYPE_A)
-        else:
-            raise Exception("Problem Resolving Domain")          
-        if(timeout>10):
+
+        else:  # if no answer or nameserver is found raise an exception
+            raise Exception("Problem Resolving Domain")
+        if timeout > 10:  # if the timeout is greater than 10 raise an exception
             raise Exception("Problem Resolving Domain")
 
 
@@ -217,27 +233,38 @@ def ip_to_bytes(ip_address):
         raise ValueError(f"Invalid IP address '{ip_address}': {e}")
 
 
-# main function to start the server and listen for incoming requests to resolve domain names
+# main function to listen for incoming requests and resolve domain names to ip addresses and send them back to the client
 def main():
-    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server.bind((address, port))
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # create a UDP socket
+    server.bind((address, port))  # bind the socket to the address and port
     print(f"DNS server listening on {address}:{port}")
 
+    # while the server is running keep listening for incoming requests
     while True:
+        print("\n")
+        data, addr = server.recvfrom(
+            1024
+        )  # receive the data and address from the client
+
         try:
-            data, addr = server.recvfrom(1024)
-            request = parse_dns_packet(data)
-            query = request.questions[0]
-            domain_name = query.name.decode("ascii")
-            record_type = query.type_
+            request = parse_dns_packet(data)  # parse the request
+            query = request.questions[0]  # get the first question from the request
+            domain_name = query.name.decode("ascii")  # decode the domain name
+            record_type = query.type_  # get the record type
             print(f"Received query for {domain_name} ({record_type}) from {addr}")
+
+            # resolve the domain name and get the ip address of the domain
             ip_address = resolve(domain_name, record_type)
             print(f"Resolved {domain_name} to {ip_address}")
+
+            # send the ip address back to the client in bytes
             ipBytes = ip_to_bytes(ip_address)
             server.sendto(ipBytes, addr)
+
+        # if an error occurs send an error message back to the client with ip address 'None'
         except Exception as e:
-            print("Error Occured: "+str(e))
-            ipBytes = ip_to_bytes('0.0.0.0')
+            print(f"Error: {e}")
+            ipBytes = ip_to_bytes("0.0.0.0")
             server.sendto(ipBytes, addr)
 
 
